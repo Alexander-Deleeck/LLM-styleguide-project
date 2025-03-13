@@ -1,4 +1,5 @@
 import json
+import docx
 import sys
 import docx
 import regex as re
@@ -7,6 +8,16 @@ from pydantic import BaseModel
 from openai import AzureOpenAI
 import os
 from dotenv import load_dotenv
+import docx
+from docx.shared import Pt
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+import uuid
+
+#from docx import Document
+from docx import Document  # Use bayoo-docx for native comment support
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 
 load_dotenv()
 
@@ -205,3 +216,74 @@ def append_adherence_to_cases(cases_list: List[Dict], adherence_cases_dict: Dict
         print(f"Appending case: {final_item}")
         final_cases.append(final_item)
     return final_cases
+
+
+def add_comments_to_docx(docx_path, json_path, output_path=None):
+    """
+    Adds comments to a .docx file for terms marked as 'adheres_to_rule': False in the results.json file.
+
+    Parameters:
+        docx_path (str): Path to the .docx file.
+        json_path (str): Path to the JSON results file.
+
+    Output:
+        Saves a new `.docx` file with comments added for incorrect hyphenations.
+    """
+    # Load the docx file using bayoo-docx
+    doc = Document(docx_path)
+
+    # Load results JSON
+    with open(json_path, 'r', encoding='utf-8') as f:
+        results = json.load(f)
+
+    # Filter out cases that do not adhere to the rule
+    incorrect_cases = [case for case in results if not case["adheres_to_rule"]]
+
+    # Unique ID generator for comments
+    comment_id_counter = 1
+
+    # Process paragraphs to find exact matches
+    for case in incorrect_cases:
+        match_text = case["match_term"]
+
+        for para in doc.paragraphs:
+            if match_text in para.text:
+                found = False
+                for run in para.runs:
+                    if match_text in run.text:
+                        # Insert comment using bayoo-docx's built-in comment support
+                        para.add_comment(
+                            text=f"Incorrect hyphenation: '{match_text}' should be revised.",
+                            author="Proofreader",
+                            
+                        )
+                        comment_id_counter += 1
+                        found = True
+                        break
+                if found:
+                    break  # Move to the next case once matched
+
+    # Generate output filename
+    if output_path is None:
+        output_path = generate_output_filename(docx_path)
+
+    # Save the modified document
+    doc.save(output_path)
+    print(f"✅ Comments added and document saved to {output_path}")
+
+def generate_output_filename(docx_path):
+    """
+    Generates a new filename with `_hyphenation_comments` before the `.docx` extension.
+
+    Parameters:
+        docx_path (str): The original file path.
+
+    Returns:
+        str: The modified output file path.
+    """
+    uuid_str = str(uuid.uuid1()).split('-')[0]
+    base, ext = os.path.splitext(docx_path)
+    if 'hyphenation' in base.split('/')[-1]:
+        return f"{base}_comments_{uuid_str}{ext}"
+    else:
+        return f"{base}_hyphenation_comments_{uuid_str}{ext}"
